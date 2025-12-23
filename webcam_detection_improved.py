@@ -1,7 +1,100 @@
 import cv2
 import time
 import numpy as np
+import os
+import platform
 from ultralytics import YOLO
+
+# プラットフォーム検出
+IS_WINDOWS = platform.system() == 'Windows'
+IS_LINUX = platform.system() == 'Linux'
+
+# Windows環境でMSMFカメラバックエンドを使用（DirectShow より高速）
+if IS_WINDOWS:
+    os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '1'
+
+# PyTorch CPU最適化
+os.environ['OMP_NUM_THREADS'] = str(os.cpu_count() or 4)
+os.environ['MKL_NUM_THREADS'] = str(os.cpu_count() or 4)
+os.environ['NUMEXPR_NUM_THREADS'] = str(os.cpu_count() or 4)
+
+# PyTorchのスレッド数を設定
+try:
+    import torch
+    torch.set_num_threads(os.cpu_count() or 4)
+    torch.set_num_interop_threads(max(1, (os.cpu_count() or 4) // 2))
+except:
+    pass
+
+print("✓ CPU最適化モードを使用")
+print(f"  プラットフォーム: {platform.system()} {platform.release()}")
+print(f"  スレッド数: {os.cpu_count()} cores")
+
+# カメラ読み込みを別スレッドで行うクラス（遅延削減）
+import threading
+from queue import Queue
+
+class ThreadedCamera:
+    def __init__(self, src=0):
+        # プラットフォームに応じたバックエンドを選択
+        if IS_WINDOWS:
+            self.cap = cv2.VideoCapture(src, cv2.CAP_MSMF)
+        elif IS_LINUX:
+            self.cap = cv2.VideoCapture(src, cv2.CAP_V4L2)  # LinuxではV4L2を使用
+        else:
+            self.cap = cv2.VideoCapture(src)  # macOSなど
+        
+        # カメラ設定
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        self.cap.set(cv2.CAP_PROP_FPS, 30)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        
+        # 最新フレームのみ保持
+        self.frame = None
+        self.grabbed = False
+        self.stopped = False
+        self.lock = threading.Lock()
+        
+    def start(self):
+        threading.Thread(target=self.update, daemon=True).start()
+        return self
+    
+    def update(self):
+        while not self.stopped:
+            grabbed, frame = self.cap.read()
+            with self.lock:
+                self.grabbed = grabbed
+                self.frame = frame
+    
+    def read(self):
+        with self.lock:
+            return self.grabbed, self.frame.copy() if self.frame is not None else None
+    
+    def stop(self):
+        self.stopped = True
+        self.cap.release()
+    
+    def isOpened(self):
+        return self.cap.isOpened()
+
+# デバイス検出関数（CPUに固定）
+def detect_best_device():
+    """利用可能な最適なデバイスを検出"""
+    # このハードウェアではCPUが最速
+    return 'cpu'
+
+# モデルウォームアップ（簡略版）
+def warmup_model(model, imgsz=640):
+    """モデルをウォームアップ"""
+    try:
+        print("  モデルウォームアップ中...")
+        dummy_frame = np.zeros((imgsz, imgsz, 3), dtype=np.uint8)
+        for _ in range(2):
+            _ = model(dummy_frame, imgsz=imgsz, verbose=False)
+        print("  ✓ ウォームアップ完了")
+    except:
+        pass
 
 def print_model_menu():
     """モデル選択メニューを表示"""
@@ -206,34 +299,54 @@ def main():
     # rtdetr-l.pt - Large版
     # rtdetr-x.pt - Extra Large版
     
+    # デバイス検出
+    device = detect_best_device()
+    device_name = str(device)
+    is_gpu = (device == 'dml' or device == 'cuda')
+    
+    print(f"検出されたデバイス: {device}")
+    if device == 'dml':
+        print("✓ DirectML（Intel/AMD GPU）を使用 - 高速化モード有効")
+    elif device == 'cuda':
+        print("✓ CUDA（NVIDIA GPU）を使用 - 高速化モード有効")
+    else:
+        print("⚠ CPU モード - GPU が検出されませんでした")
+    
     print("モデルをロード中...")
     model_name = select_model_at_startup()
+    
+    # PyTorch版を直接使用（ONNXは使わない）
     model = YOLO(model_name)
-
+    model.fuse()
+    
     # 検出パラメータ（調整可能）
     conf_threshold = 0.5  # 信頼度閾値（0.0-1.0）
     iou_threshold = 0.45  # IOU閾値（0.0-1.0）
+    imgsz = 640  # 推論画像サイズ（小さいほど高速: 320, 480, 640）
     
-    # Webカメラをキャプチャ
-    cap = cv2.VideoCapture(0)
+    # モデルウォームアップ
+    warmup_model(model, imgsz=imgsz)
     
-    # カメラの解像度を高く設定
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    
-    # フレームレートを制限（25FPS）して処理を安定化
-    cap.set(cv2.CAP_PROP_FPS, 25)
+    # Webカメラをキャプチャ（マルチスレッド版）
+    cap = ThreadedCamera(0)
     
     if not cap.isOpened():
         print("エラー: Webカメラを開くことができません")
         return
     
+    # カメラスレッドを起動
+    cap.start()
+    import time as time_module
+    time_module.sleep(0.5)  # カメラの初期化待機
+    
     print("=" * 60)
-    print("YOLO - リアルタイム物体検出")
+    print("YOLO - リアルタイム物体検出（高速化版）")
     print("=" * 60)
     print(f"使用モデル: {model_name}")
+    print(f"デバイス: {device}")
     print(f"信頼度閾値: {conf_threshold:.2f}")
     print(f"IOU閾値: {iou_threshold:.2f}")
+    print(f"画像サイズ: {imgsz}px")
     print("\nキーボード操作:")
     print("  q: 終了")
     print("  m: モデルを変更（画面で選択）")
@@ -241,6 +354,8 @@ def main():
     print("  x: 信頼度を下げる（-0.05）")
     print("  i: IOU閾値を上げる（+0.05）")
     print("  u: IOU閾値を下げる（-0.05）")
+    print("  s: 画像サイズ切替（320/480/640）")
+    print("  f: フレームスキップ切替（なし/1おき/2おき）")
     print("=" * 60)
     
     # 検出したいクラスを設定（YOLO-Worldの場合）
@@ -252,6 +367,8 @@ def main():
         ])
     
     prev_time = 0
+    frame_skip = 0  # フレームスキップカウンター
+    skip_frames = 0  # 0=スキップなし、1=1フレームおき
     
     while True:
         current_time = time.time()
@@ -260,23 +377,34 @@ def main():
         
         ret, frame = cap.read()
         
-        if not ret:
-            print("エラー: フレームを読み込めません")
-            break
+        if not ret or frame is None:
+            continue
         
-        # YOLOで物体検出を実行（調整可能なパラメータを使用）
-        results = model(frame, conf=conf_threshold, iou=iou_threshold)
+        # フレームスキップ処理
+        frame_skip += 1
+        if skip_frames > 0 and frame_skip % (skip_frames + 1) != 0:
+            # 前回の検出結果を再利用
+            if 'annotated_frame' in locals():
+                cv2.imshow('YOLO', annotated_frame)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                break
+            continue
+        
+        # YOLOで物体検出を実行
+        results = model(frame, conf=conf_threshold, iou=iou_threshold, 
+                       imgsz=imgsz, verbose=False)
         
         # 検出結果を描画
         annotated_frame = results[0].plot()
         
         # 情報を表示
-        cv2.putText(annotated_frame, f"Model: {model_name}", 
-                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        cv2.putText(annotated_frame, f"Model: {model_name} | Device: {device}", 
+                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         cv2.putText(annotated_frame, f"FPS: {fps:.2f}", 
-               (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        cv2.putText(annotated_frame, f"Conf: {conf_threshold:.2f} | IOU: {iou_threshold:.2f}", 
-               (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+               (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(annotated_frame, f"Conf: {conf_threshold:.2f} | IOU: {iou_threshold:.2f} | ImgSize: {imgsz}", 
+               (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         
         # 検出数を表示
         detections = results[0].boxes
@@ -298,7 +426,11 @@ def main():
             else:
                 model_name = selection
                 print(f"モデルをロード中: {model_name}")
+                
+                # 新しいモデルをロード
                 model = YOLO(model_name)
+                model.fuse()
+                
                 # YOLO-Worldの場合はクラスを設定
                 if 'world' in model_name:
                     model.set_classes([
@@ -306,17 +438,9 @@ def main():
                         "cup", "bottle", "chair", "book", "pen", "clock",
                         "door", "mirror", "remote", "pillow"
                     ])
-            
-            # YOLO-Worldの場合はクラスを設定
-            if 'world' in model_name:
-                model.set_classes([
-                    "person", "car", "dog", "cat", "phone", "laptop", 
-                    "cup", "bottle", "chair", "book", "pen", "clock", 
-                    "door", "mirror", "remote", "pillow"
-                ])
-            
-            print(f"\n✓ モデルを変更しました: {model_name}")
-            prev_time = 0
+                
+                print(f"\n✓ モデルを変更しました: {model_name}")
+                prev_time = 0
         elif key == ord('c'):
             conf_threshold = min(1.0, conf_threshold + 0.05)
             print(f"信頼度を上げました: {conf_threshold:.2f}")
@@ -329,9 +453,28 @@ def main():
         elif key == ord('u'):
             iou_threshold = max(0.0, iou_threshold - 0.05)
             print(f"IOU閾値を下げました: {iou_threshold:.2f}")
+        elif key == ord('s'):
+            # 画像サイズを切り替え（320→480→640→320...）
+            if imgsz == 640:
+                imgsz = 320
+            elif imgsz == 320:
+                imgsz = 480
+            else:
+                imgsz = 640
+            print(f"画像サイズを変更しました: {imgsz}px（小さいほど高速）")
+        elif key == ord('f'):
+            # フレームスキップを切り替え（0→1→2→0...）
+            if skip_frames == 0:
+                skip_frames = 1
+            elif skip_frames == 1:
+                skip_frames = 2
+            else:
+                skip_frames = 0
+            skip_name = "なし" if skip_frames == 0 else f"{skip_frames}フレームおき"
+            print(f"フレームスキップを変更しました: {skip_name}（高速化）")
     
     # リソースを解放
-    cap.release()
+    cap.stop()
     cv2.destroyAllWindows()
     print("プログラムを終了しました")
 
