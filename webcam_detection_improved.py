@@ -314,31 +314,31 @@ def main():
     
     print("モデルをロード中...")
     model_name = select_model_at_startup()
-    
+
     # PyTorch版を直接使用（ONNXは使わない）
     model = YOLO(model_name)
     model.fuse()
-    
+
     # 検出パラメータ（調整可能）
     conf_threshold = 0.5  # 信頼度閾値（0.0-1.0）
     iou_threshold = 0.45  # IOU閾値（0.0-1.0）
     imgsz = 640  # 推論画像サイズ（小さいほど高速: 320, 480, 640）
-    
+
     # モデルウォームアップ
     warmup_model(model, imgsz=imgsz)
-    
+
     # Webカメラをキャプチャ（マルチスレッド版）
     cap = ThreadedCamera(0)
-    
+
     if not cap.isOpened():
         print("エラー: Webカメラを開くことができません")
         return
-    
+
     # カメラスレッドを起動
     cap.start()
     import time as time_module
     time_module.sleep(0.5)  # カメラの初期化待機
-    
+
     print("=" * 60)
     print("YOLO - リアルタイム物体検出（高速化版）")
     print("=" * 60)
@@ -357,11 +357,11 @@ def main():
     print("  s: 画像サイズ切替（320/480/640）")
     print("  f: フレームスキップ切替（なし/1おき/2おき）")
     print("=" * 60)
-    
+
     # 検出したいクラスを設定（YOLO-Worldの場合）
     if 'world' in model_name:
         model.set_classes([
-            "person", "car", "dog", "cat", "phone", "laptop", 
+             "car", "dog", "cat", "phone", "laptop", 
             "cup", "bottle", "chair", "book", "pen", "clock", 
             "door", "mirror", "remote", "pillow"
         ])
@@ -370,16 +370,34 @@ def main():
     frame_skip = 0  # フレームスキップカウンター
     skip_frames = 0  # 0=スキップなし、1=1フレームおき
     
+    # --- ラベル履歴バッファを用意 ---
+    from collections import deque, Counter, defaultdict
+    LABEL_HISTORY_LEN = 100  # 過去Nフレーム
+    # オブジェクトごとにID（中心座標で近いものを同一とみなす）で履歴を管理
+    object_label_history = defaultdict(lambda: deque(maxlen=LABEL_HISTORY_LEN))
+    def get_center(box):
+        x1, y1, x2, y2 = box
+        return ((x1 + x2) / 2, (y1 + y2) / 2)
+    def find_nearest_object_id(center, prev_centers, threshold=50):
+        # 直近フレームの中心座標リストと比較し、近いものがあればそのIDを返す
+        for obj_id, prev_center in prev_centers.items():
+            dist = ((center[0] - prev_center[0]) ** 2 + (center[1] - prev_center[1]) ** 2) ** 0.5
+            if dist < threshold:
+                return obj_id
+        return None
+    next_object_id = 0
+    prev_object_centers = {}
+
     while True:
         current_time = time.time()
         fps = 1 / (current_time - prev_time) if (current_time - prev_time) > 0 else 0
         prev_time = current_time
-        
+
         ret, frame = cap.read()
-        
+
         if not ret or frame is None:
             continue
-        
+
         # フレームスキップ処理
         frame_skip += 1
         if skip_frames > 0 and frame_skip % (skip_frames + 1) != 0:
@@ -390,30 +408,96 @@ def main():
             if key == ord('q'):
                 break
             continue
-        
+
         # YOLOで物体検出を実行
         results = model(frame, conf=conf_threshold, iou=iou_threshold, 
                        imgsz=imgsz, verbose=False)
-        
-        # 検出結果を描画
-        annotated_frame = results[0].plot()
-        
-        # 情報を表示
-        cv2.putText(annotated_frame, f"Model: {model_name} | Device: {device}", 
-                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(annotated_frame, f"FPS: {fps:.2f}", 
-               (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(annotated_frame, f"Conf: {conf_threshold:.2f} | IOU: {iou_threshold:.2f} | ImgSize: {imgsz}", 
-               (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
-        # 検出数を表示
-        detections = results[0].boxes
-        cv2.putText(annotated_frame, f"Detected: {len(detections)} objects", 
-               (10, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        
+
+        # --- 検出ラベルを各オブジェクトごとに履歴に追加 ---
+        boxes = results[0].boxes
+        curr_object_centers = {}
+        object_ids_in_frame = []
+        if hasattr(boxes, 'cls'):
+            clses = boxes.cls.cpu().numpy()
+            xyxy = boxes.xyxy.cpu().numpy()
+            labels = [results[0].names[int(cls)] for cls in clses]
+            for i, (box, label) in enumerate(zip(xyxy, labels)):
+                center = get_center(box)
+                obj_id = find_nearest_object_id(center, prev_object_centers)
+                if obj_id is None:
+                    obj_id = next_object_id
+                    next_object_id += 1
+                curr_object_centers[obj_id] = center
+                object_label_history[obj_id].append(label)
+                object_ids_in_frame.append((obj_id, box))
+        prev_object_centers = curr_object_centers
+
+
+
+        # --- モデル種別で描画方法を分岐 ---
+        if 'seg' in model_name:
+            # セグメンテーションモデルはplot()のマスク画像＋安定化ラベルのみ（バウンディングボックスや元ラベルは表示しない）
+            annotated_frame = results[0].plot()
+            if hasattr(boxes, 'xyxy') and hasattr(boxes, 'cls'):
+                for obj_id, box in object_ids_in_frame:
+                    x1, y1, x2, y2 = map(int, box)
+                    label_hist = object_label_history[obj_id]
+                    if label_hist:
+                        most_common_label, count = Counter(label_hist).most_common(1)[0]
+                        stable_label_text = f"{most_common_label} ({count}/{len(label_hist)})"
+                    else:
+                        stable_label_text = "None"
+                    # バウンディングボックスや元ラベルは描画しない
+                    cv2.putText(
+                        annotated_frame,
+                        stable_label_text,
+                        (x1 + 6, y1 + 20),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (0, 128, 255),
+                        2
+                    )
+        else:
+            # それ以外は自前でバウンディングボックス＋ラベル
+            annotated_frame = frame.copy()
+            for obj_id, box in object_ids_in_frame:
+                x1, y1, x2, y2 = map(int, box)
+                # バウンディングボックス描画
+                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                # オブジェクトごとの安定化ラベル
+                label_hist = object_label_history[obj_id]
+                if label_hist:
+                    most_common_label, count = Counter(label_hist).most_common(1)[0]
+                    stable_label_text = f"{most_common_label} ({count}/{len(label_hist)})"
+                else:
+                    stable_label_text = "None"
+                cv2.putText(
+                    annotated_frame,
+                    stable_label_text,
+                    (x1 + 6, y1 + 20),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 128, 255),
+                    2
+                )
+
+        # 情報を表示（セグメンテーションモデルでは非表示）
+        if 'seg' not in model_name:
+            cv2.putText(annotated_frame, f"Model: {model_name} | Device: {device}", 
+                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(annotated_frame, f"FPS: {fps:.2f}", 
+                   (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(annotated_frame, f"Conf: {conf_threshold:.2f} | IOU: {iou_threshold:.2f} | ImgSize: {imgsz}", 
+                   (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+            # 検出数を表示
+            detections = results[0].boxes
+            cv2.putText(annotated_frame, f"Detected: {len(detections)} objects", 
+                   (10, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
         # フレームを表示
         cv2.imshow('YOLO', annotated_frame)
-        
+
         # キー入力処理
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
