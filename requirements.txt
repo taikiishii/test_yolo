@@ -1,0 +1,21 @@
+# Python 3.10推奨
+# Raspberry Pi AI HAT+ (Hailo-8L) 対応環境
+
+# 基本パッケージ
+opencv-python>=4.8.0
+ultralytics>=8.0.0
+numpy>=1.24.0,<2.0.0
+
+# PyTorch (CPU版 - Raspberry Piの場合)
+# GPU版が必要な場合は公式サイトから適切なバージョンをインストール
+torch>=2.0.0,<2.3.0
+torchvision>=0.15.0
+
+# Hailo AI HAT+ 関連 (Raspberry Pi使用時)
+# 注意: これらは事前にHailo SDKのインストールが必要な場合があります
+# hailo-platform>=4.17.0
+# hailort>=4.17.0
+
+# オプション: パフォーマンス改善
+# Pillow>=10.0.0
+# psutil>=5.9.0

@@ -1,3 +1,67 @@
-# Ignore model files
+# Python仮想環境
+venv/
+env/
+ENV/
+.venv/
+
+# YOLOモデルファイル（大容量）
 *.pt
+*.pth
 *.onnx
+*.engine
+*.trt
+*.weights
+*.bin
+
+# Pythonキャッシュ
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# pyenv設定
+.python-version
+
+# IDE設定ファイル
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS生成ファイル
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ログファイル
+*.log
+logs/
+
+# Ultralytics設定・キャッシュ
+runs/
+.yolo/
+yolo_cache/
+
+# テスト・一時ファイル
+*.tmp
+temp/
+tmp/
+test_images/
+output/
+
+# カバレッジレポート
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# 環境変数ファイル
+.env
+.env.local

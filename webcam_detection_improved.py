@@ -786,9 +786,13 @@ def main():
                 print(f"✓ モデルを変更しました: {model_name} (デバイス: {device})")
                 
                 # GPUに戻れなかった場合のメッセージ
-                if not is_gpu and torch.cuda.is_available():
-                    print("  ⚠ 注意: GPUメモリの状態が不安定なため、CPUモードで動作しています")
-                    print("  → GPUを使用するには、プログラムを再起動してください")
+                try:
+                    import torch
+                    if not is_gpu and torch.cuda.is_available():
+                        print("  ⚠ 注意: GPUメモリの状態が不安定なため、CPUモードで動作しています")
+                        print("  → GPUを使用するには、プログラムを再起動してください")
+                except ImportError:
+                    pass
                 
                 prev_time = 0
         elif key == ord('c'):
