@@ -193,18 +193,21 @@ def print_model_menu():
     print(" 11: yolov8m-seg.pt - Medium版")
     print(" 12: yolov8l-seg.pt - Large版")
     print("\n【姿勢推定版 - 骨格検出】")
-    print(" 13: yolov8s-pose.pt - Small版")
-    print(" 14: yolov8m-pose.pt - Medium版")
+    print(" 13: yolov8n-pose.pt - Nano版（最軽量）")
+    print(" 14: yolov8s-pose.pt - Small版")
+    print(" 15: yolov8m-pose.pt - Medium版")
+    print(" 16: yolov8l-pose.pt - Large版")
+    print(" 17: yolov8x-pose.pt - Extra Large版（最高精度）")
     print("\n【YOLOv9 - より高精度】")
-    print(" 15: yolov9c.pt - Compact版")
+    print(" 18: yolov9c.pt - Compact版")
     print("\n【RT-DETR - 境界ボックス最適化】")
-    print(" 16: rtdetr-l.pt - Large版")
+    print(" 19: rtdetr-l.pt - Large版")
     print("\n【YOLO11 - 最新版(高速・高精度)】")
-    print(" 17: yolo11n.pt - Nano版 ← Jetson推奨")
-    print(" 18: yolo11s.pt - Small版")
-    print(" 19: yolo11m.pt - Medium版")
-    print(" 20: yolo11l.pt - Large版")
-    print(" 21: yolo11x.pt - Extra Large版")
+    print(" 20: yolo11n.pt - Nano版 ← Jetson推奨")
+    print(" 21: yolo11s.pt - Small版")
+    print(" 22: yolo11m.pt - Medium版")
+    print(" 23: yolo11l.pt - Large版")
+    print(" 24: yolo11x.pt - Extra Large版")
     print("=" * 70)
 
 def select_model_at_startup():
@@ -222,26 +225,29 @@ def select_model_at_startup():
         '10': 'yolov8s-seg.pt',
         '11': 'yolov8m-seg.pt',
         '12': 'yolov8l-seg.pt',
-        '13': 'yolov8s-pose.pt',
-        '14': 'yolov8m-pose.pt',
-        '15': 'yolov9c.pt',
-        '16': 'rtdetr-l.pt',
-        '17': 'yolo11n.pt',
-        '18': 'yolo11s.pt',
-        '19': 'yolo11m.pt',
-        '20': 'yolo11l.pt',
-        '21': 'yolo11x.pt',
+        '13': 'yolov8n-pose.pt',
+        '14': 'yolov8s-pose.pt',
+        '15': 'yolov8m-pose.pt',
+        '16': 'yolov8l-pose.pt',
+        '17': 'yolov8x-pose.pt',
+        '18': 'yolov9c.pt',
+        '19': 'rtdetr-l.pt',
+        '20': 'yolo11n.pt',
+        '21': 'yolo11s.pt',
+        '22': 'yolo11m.pt',
+        '23': 'yolo11l.pt',
+        '24': 'yolo11x.pt',
     }
     
     print_model_menu()
     
     # Jetson環境では推奨モデルを表示
     if IS_JETSON:
-        print("\n💡 Jetson環境では 17 (yolo11n.pt) または 1 (yolov8n.pt) を推奨します")
+        print("\n💡 Jetson環境では 20 (yolo11n.pt) または 13 (yolov8n-pose.pt) を推奨します")
         print("   Enterキーで推奨モデル(yolo11n.pt)を自動選択できます")
     
     while True:
-        choice = input("\nモデルを選択してください (1-21): ").strip()
+        choice = input("\nモデルを選択してください (1-24): ").strip()
         
         # Jetson環境でEnterキーのみの場合は推奨モデルを選択
         if choice == "" and IS_JETSON:
@@ -251,7 +257,7 @@ def select_model_at_startup():
         if choice in model_map:
             return model_map[choice]
         else:
-            print("❌ 無効な選択です。1-21の数字を入力してください。")
+            print("❌ 無効な選択です。1-24の数字を入力してください。")
 
 def select_model_interactive():
     """実行中にモデルを選択（OpenCVウィンドウ上でキー入力）"""
@@ -268,15 +274,18 @@ def select_model_interactive():
         '10': 'yolov8s-seg.pt',
         '11': 'yolov8m-seg.pt',
         '12': 'yolov8l-seg.pt',
-        '13': 'yolov8s-pose.pt',
-        '14': 'yolov8m-pose.pt',
-        '15': 'yolov9c.pt',
-        '16': 'rtdetr-l.pt',
-        '17': 'yolo11n.pt',
-        '18': 'yolo11s.pt',
-        '19': 'yolo11m.pt',
-        '20': 'yolo11l.pt',
-        '21': 'yolo11x.pt',
+        '13': 'yolov8n-pose.pt',
+        '14': 'yolov8s-pose.pt',
+        '15': 'yolov8m-pose.pt',
+        '16': 'yolov8l-pose.pt',
+        '17': 'yolov8x-pose.pt',
+        '18': 'yolov9c.pt',
+        '19': 'rtdetr-l.pt',
+        '20': 'yolo11n.pt',
+        '21': 'yolo11s.pt',
+        '22': 'yolo11m.pt',
+        '23': 'yolo11l.pt',
+        '24': 'yolo11x.pt',
     }
 
     # GUI機能がない場合またはDISPLAY_AVAILABLEがFalseの場合は常にコンソール入力
@@ -309,11 +318,11 @@ def select_model_interactive():
             y += 35
             cv2.putText(img, "10-12: YOLOv8-Seg (s/m/l)", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
             y += 35
-            cv2.putText(img, "13-14: YOLOv8-Pose (s/m)", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
+            cv2.putText(img, "13-17: YOLOv8-Pose (n/s/m/l/x)", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 100), 2)
             y += 35
-            cv2.putText(img, "15: YOLOv9c, 16: RT-DETR-l", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
+            cv2.putText(img, "18: YOLOv9c, 19: RT-DETR-l", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
             y += 35
-            cv2.putText(img, "17-21: YOLO11 (n/s/m/l/x)", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
+            cv2.putText(img, "20-24: YOLO11 (n/s/m/l/x)", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
             y += 50
             cv2.putText(img, f"入力: {typed}", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255), 2)
             y += 40
@@ -350,12 +359,12 @@ def select_model_interactive():
         print("コンソールから選択してください:")
         print_model_menu()
         while True:
-            choice = input("\nモデルを選択 (1-21, Enterでキャンセル): ").strip()
+            choice = input("\nモデルを選択 (1-24, Enterでキャンセル): ").strip()
             if choice == "":
                 return None
             if choice in model_map:
                 return model_map[choice]
-            print("❌ 無効な選択です。1-21の数字を入力してください。")
+            print("❌ 無効な選択です。1-24の数字を入力してください。")
 
 def main():
     """
@@ -601,8 +610,8 @@ def main():
         prev_object_centers = curr_object_centers
         
         # --- モデル種別で描画方法を分岐 ---
-        if 'seg' in model_name:
-            # セグメンテーションモデルはplot()のマスク画像＋安定化ラベルのみ
+        if 'seg' in model_name or 'pose' in model_name:
+            # セグメンテーション＆ポーズモデルはplot()でマスク画像＋骨格を自動描画
             annotated_frame = results[0].plot()
             if hasattr(boxes, 'xyxy') and hasattr(boxes, 'cls'):
                 for obj_id, box in object_ids_in_frame:
@@ -647,8 +656,8 @@ def main():
                     2
                 )
         
-        # 情報を表示（セグメンテーションモデルでは非表示）
-        if 'seg' not in model_name:
+        # 情報を表示（セグメンテーション＆ポーズモデルでは非表示）
+        if 'seg' not in model_name and 'pose' not in model_name:
             cv2.putText(annotated_frame, f"Model: {model_name} | Device: {device}", 
                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             cv2.putText(annotated_frame, f"FPS: {fps:.2f}", 
